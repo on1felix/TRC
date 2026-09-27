@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Onest';
+  src: url('/fonts/Onest.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono.ttf') format('truetype');
+  font-weight: 100 800;
+  font-display: block;
+}
+
+@layer base {
+  /* Окна оверлея — полностью прозрачные,
+     иначе WebView заливает весь экран фоном */
+  html.overlay,
+  html.overlay body,
+  html.overlay #root {
+    background: transparent !important;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: none;
+  }
+
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'Onest', system-ui, sans-serif;
+    background: #16181d;
+    color: #ffffff;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* В полях текст всегда можно выделять и копировать */
+  textarea, input[type='text'], input:not([type]) {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(138, 143, 156, 0.25);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(138, 143, 156, 0.45);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* Спокойный фон: тёмная база + приглушённые пятна + зерно + виньетка */
+  .app-bg {
+    position: fixed;
+    inset: 0;
+    background: #14161b;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .app-bg::before {
+    content: '';
+    position: absolute;
+    inset: -10%;
+    background:
+      radial-gradient(720px 460px at 12% 6%, rgba(94, 143, 194, 0.10), transparent 60%),
+      radial-gradient(680px 500px at 90% 90%, rgba(110, 130, 160, 0.08), transparent 60%),
+      radial-gradient(480px 420px at 85% 10%, rgba(120, 140, 170, 0.06), transparent 60%);
+    animation: bg-drift 36s ease-in-out infinite alternate;
+  }
+
+  .app-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* лёгкое зерно */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity: 0.025;
+    /* виньетка поверх */
+    box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.5);
+  }
+
+  @keyframes bg-drift {
+    from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+    to { transform: translate3d(1.5%, 1%, 0) scale(1.04); }
+  }
+  .glass {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .card {
+    @apply rounded-xl border p-5;
+    background: linear-gradient(180deg, #1b202a 0%, #181c24 100%);
+    border-color: #262c38;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(94, 143, 194, 0.12),
+                0 0 60px rgba(94, 143, 194, 0.05);
+  }
+
+  .glow-text {
+    text-shadow: 0 0 20px rgba(94, 143, 194, 0.25);
+  }
+
+  .gradient-border {
+    position: relative;
+  }
+
+  .gradient-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(94, 143, 194, 0.35), transparent 50%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .overlay-text {
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.9),
+      0 0 8px rgba(0, 0, 0, 0.8);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
