@@ -5,7 +5,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
     <button
       onClick={() => onChange(!checked)}
       className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
-        checked ? 'bg-success/80' : 'bg-white/10'
+        checked ? 'bg-accent' : 'bg-white/10'
       }`}
     >
       <motion.span

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Loader2, AlertTriangle } from 'lucide-react';
-import { api, type CaptureResult } from '../api';
-import { ocrDataUrl, cropDataUrl, onOcrStage } from '../lib/ocr';
+import { api, detectLang, type CaptureResult } from '../api';
+import { ocrDataUrl, cropDataUrl, cleanOcrText, wordSanity } from '../lib/ocr';
 
 type Phase = 'shot' | 'select' | 'work' | 'empty' | 'error';
 interface Rect {
@@ -22,7 +22,6 @@ export function SelectorOverlay() {
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [phase, setPhase] = useState<Phase>('shot');
   const [status, setStatus] = useState('Готовлю кадр…');
-  const [ocrHint, setOcrHint] = useState('');
   const busy = useRef(false);
   const runId = useRef(0);
 
@@ -104,7 +103,6 @@ export function SelectorOverlay() {
         off = f;
       })
       .catch(() => {});
-    const offOcr = onOcrStage((_s, detail) => setOcrHint(detail));
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         runId.current++;
@@ -116,7 +114,6 @@ export function SelectorOverlay() {
     return () => {
       runId.current++;
       window.removeEventListener('keydown', h);
-      offOcr();
       offOpen?.();
       off?.();
     };
@@ -148,13 +145,34 @@ export function SelectorOverlay() {
     busy.current = true;
     const my = runId.current;
     const alive = () => runId.current === my;
+    let engineName = 'system';
     setPhase('work');
     try {
       setStatus('Вырезаю…');
       const crop = await cropDataUrl(shot.url, cx, cy, cw, ch);
       if (!alive()) return;
+      const st = await api.getSettings();
+      engineName = st.ocrEngine;
+      if (!alive()) return;
       setStatus('Распознаю текст…');
-      const original = await ocrDataUrl(crop);
+      // Движок из настроек: system (Windows OCR) или builtin (tesseract).
+      const useBuiltin = st.ocrEngine === 'builtin';
+      if (useBuiltin) setStatus('Распознаю текст (встроенный)…');
+      const readAs = async (lang: string) =>
+        useBuiltin
+          ? ocrDataUrl(crop, lang)
+          : api.ocrImage(crop.split(',')[1] ?? '', lang);
+      let original = cleanOcrText(await readAs(st.source));
+      if (!alive()) return;
+      // Чужим движком выходит транслит-мусор вида «npoAaM» — тогда читаем
+      // вторым языком и берём более вменяемый вариант.
+      const otherLang = st.source === 'ru' ? 'en' : 'ru';
+      if (wordSanity(original) < 0.7) {
+        setStatus('Перечитываю другим языком…');
+        const retry = cleanOcrText(await readAs(otherLang));
+        if (!alive()) return;
+        if (wordSanity(retry) > wordSanity(original)) original = retry;
+      }
       if (!alive()) return;
       if (!original || original.replace(/[^a-zA-Zа-яА-ЯёЁ]/g, '').length < 2) {
         setPhase('empty');
@@ -163,19 +181,33 @@ export function SelectorOverlay() {
         setPhase('select');
         return;
       }
+      // Язык распознанного — ведущий: направление переключается само.
+      let source = st.source;
+      let target = st.target;
+      const detected = detectLang(original);
+      if (detected && detected !== source) {
+        source = detected;
+        target = detected === 'ru' ? 'en' : 'ru';
+        await api.saveSettings({ ...st, source, target }).catch(() => {});
+        if (!alive()) return;
+      }
       setStatus('Перевожу…');
-      const st = await api.getSettings();
-      const translated = await api.translateText(original, st.engine, st.libreUrl, st.source, st.target);
+      const translated = await api.translateText(original, st.engine, st.libreUrl, source, target);
       if (!alive()) return;
       const res: CaptureResult = { original, translated };
       await emit('trc:capture-result', res);
-      await api.closeSelector();
+      // Успех: окна НЕ возвращаем — откроется только панель.
+      await api.closeSelector(false);
       await api.showPanel();
     } catch (e) {
       if (!alive()) return;
       // Ошибку показываем и НЕ закрываем — видно, что случилось.
+      // Подсказываем второй способ: выбор стрелкой у статуса OCR в главном окне.
+      const other = engineName === 'builtin' ? '«Системный»' : '«Встроенный»';
       setPhase('error');
-      setStatus(`Не вышло: ${e instanceof Error ? e.message : String(e)} — выдели заново или Esc`);
+      setStatus(
+        `Не вышло: ${e instanceof Error ? e.message : String(e)} — выдели заново, Esc, или попробуй движок ${other}`,
+      );
     } finally {
       if (alive()) busy.current = false;
     }
@@ -242,7 +274,6 @@ export function SelectorOverlay() {
         {picking ? (
           <span className="truncate">
             Тяни рамку по тексту · <b className="text-white">ПКМ/Esc</b> — отмена
-            {ocrHint && ocrHint !== 'OCR готов' ? <span className="ml-2 text-accent">· {ocrHint}</span> : null}
           </span>
         ) : (
           <span className="truncate">{status}</span>

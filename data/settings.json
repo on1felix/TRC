@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "engine": "bing",
+  "source": "ru",
+  "target": "en",
+  "live": true,
+  "overlayHotkey": "F8",
+  "translateHotkey": "Ctrl+Alt+T",
+  "captureHotkey": "F9",
+  "libreUrl": "https://libretranslate.de",
+  "ocrEngine": "system"
+}

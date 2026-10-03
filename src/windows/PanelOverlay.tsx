@@ -54,7 +54,7 @@ export function PanelOverlay() {
         onMouseDown={drag}
         className="flex items-center gap-2 px-3 h-9 border-b border-white/10 select-none shrink-0 cursor-move"
       >
-        <img src="/app-icon.png" alt="" className="w-4 h-4 rounded pointer-events-none" />
+        <img src="/app-icon.svg" alt="" className="w-4 h-4 rounded pointer-events-none" />
         <span className="text-xs font-semibold pointer-events-none">
           TR<span className="text-accent">C</span>
           <span className="ml-1.5 font-normal text-text-secondary">· {s.overlayHotkey} — скрыть</span>
@@ -109,7 +109,7 @@ export function PanelOverlay() {
               />
             )}
             <div className="flex items-center justify-between text-[11px] pt-0.5">
-              <span className="text-text-secondary">Переводить сразу, как печатаешь</span>
+              <span className="text-text-secondary">Автоперевод</span>
               <Toggle checked={s.live} onChange={(v) => s.patch({ live: v })} />
             </div>
           </div>

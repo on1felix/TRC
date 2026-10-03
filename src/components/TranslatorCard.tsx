@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeftRight, Copy, Check, Eraser, Loader2, Languages, ClipboardPaste } from 'lucide-react';
+import { ArrowLeftRight, Copy, Check, Eraser, Loader2, Languages } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { writeText as writeClipboard, readText as readClipboard } from '@tauri-apps/plugin-clipboard-manager';
-import { api, langName, type CaptureResult, type TrcSettings } from '../api';
+import { api, langName, detectLang, type CaptureResult, type TrcSettings } from '../api';
 import { useTrc } from '../store';
 import { Toggle } from './Toggle';
 
@@ -13,6 +13,8 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
   const [output, setOutput] = useState('');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedIn, setCopiedIn] = useState(false);
+  const [copiedOut, setCopiedOut] = useState(false);
   const [err, setErr] = useState('');
   const [via, setVia] = useState<{ engine: string; fallback: boolean } | null>(null);
   const seq = useRef(0);
@@ -122,15 +124,6 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
     return () => clearTimeout(id);
   }, [input, s.live, s.source, s.target, s.engine, s.loaded, doTranslate]);
 
-  // хоткей «перевести сейчас» из трея/глобального хоткея
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    listen('trc:translate-now', () => void doTranslate()).then((f) => {
-      off = f;
-    }).catch(() => {});
-    return () => off?.();
-  }, [doTranslate]);
-
   // синхронизация настроек между главным окном и панелью
   useEffect(() => {
     let off: (() => void) | undefined;
@@ -180,18 +173,18 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
     setOutput(input);
   };
 
-  const copy = async () => {
-    if (!output) return;
+  const copyText = async (t: string, done: () => void) => {
+    if (!t) return;
     // 1) системный буфер через Tauri-плагин (работает всегда),
     // 2) Web API, 3) старый execCommand
     try {
-      await writeClipboard(output);
+      await writeClipboard(t);
     } catch {
       try {
-        await navigator.clipboard.writeText(output);
+        await navigator.clipboard.writeText(t);
       } catch {
         const ta = document.createElement('textarea');
-        ta.value = output;
+        ta.value = t;
         ta.style.position = 'fixed';
         ta.style.opacity = '0';
         document.body.appendChild(ta);
@@ -200,30 +193,23 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
         ta.remove();
       }
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    done();
   };
 
-  const paste = async () => {
-    try {
-      const t = await readClipboard();
-      if (t) setInput(t);
-      return;
-    } catch {
-      /* fallthrough */
-    }
-    try {
-      const t = await navigator.clipboard.readText();
-      if (t) setInput(t);
-    } catch {
-      /* буфер недоступен — вставь через Ctrl+V */
-    }
+  const flash = (set: (v: boolean) => void) => {
+    set(true);
+    setTimeout(() => set(false), 1200);
   };
+
+  const copy = () => void copyText(output, () => flash(setCopied));
+  const copyIn = () => void copyText(inputRef.current, () => flash(setCopiedIn));
+  const copyOut = () => void copyText(output, () => flash(setCopiedOut));
+
 
   return (
-    <div className={compact ? 'space-y-2.5' : 'card gradient-border space-y-3'}>
+    <div className={compact ? 'h-full min-h-0 flex flex-col gap-2' : 'card gradient-border space-y-3'}>
       {/* направление */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <Languages className="w-4 h-4 text-accent shrink-0" />
         <button
           onClick={() => {
@@ -249,26 +235,46 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
           {langName(s.target)}
         </button>
         {!compact && (
-          <label className="ml-auto flex items-center gap-2 text-[11px] text-text-secondary cursor-pointer">
+          <span className="ml-auto flex items-center gap-2 text-[11px] text-text-secondary cursor-default select-none">
             <Toggle checked={s.live} onChange={(v) => s.patch({ live: v })} />
-            Как печатаешь
-          </label>
+            Автоперевод
+          </span>
         )}
       </div>
 
-      {/* ввод — текст можно писать, вставлять и выделять */}
-      <textarea
-        ref={inputEl}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={onFieldKeys('in')}
-        placeholder={s.source === 'en' ? 'Type or paste English text…' : 'Пиши или вставь текст…'}
-        spellCheck={false}
-        className={`w-full rounded-lg bg-white/[0.04] border border-border focus:border-accent/60 transition-colors text-sm p-3 resize-none select-text ${compact ? 'h-28' : 'h-32'}`}
-        style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-      />
+      {/* ввод + кнопка копирования в углу */}
+      <div className={`relative w-full ${compact ? 'flex-1 min-h-0 flex' : ''}`}>
+        <textarea
+          ref={inputEl}
+          value={input}
+          onChange={(e) => {
+            const v = e.target.value;
+            setInput(v);
+            // Вставил/напечатал на другом языке — направление переключается само.
+            const d = detectLang(v);
+            if (d && d !== useTrc.getState().source) {
+              void s.patch({ source: d, target: d === 'ru' ? 'en' : 'ru' });
+            }
+          }}
+          onKeyDown={onFieldKeys('in')}
+          placeholder={s.source === 'en' ? 'Type or paste English text…' : 'Пиши или вставь текст…'}
+          spellCheck={false}
+          className={`w-full rounded-lg bg-white/[0.04] border border-border focus:border-accent/60 transition-colors text-sm p-3 pr-10 resize-none select-text ${
+            compact ? 'flex-1 min-h-0' : 'h-32'
+          }`}
+          style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+        />
+        <button
+          onClick={copyIn}
+          disabled={!input}
+          title="Скопировать текст"
+          className="absolute top-1.5 right-1.5 p-1.5 rounded-md hover:bg-white/10 transition-colors disabled:opacity-40"
+        >
+          {copiedIn ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5 text-text-secondary" />}
+        </button>
+      </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={() => doTranslate()}
@@ -278,13 +284,8 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
           Перевести
         </motion.button>
-        <button onClick={copy} disabled={!output} title="Скопировать перевод" className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 text-xs text-text-secondary hover:border-accent/60 hover:text-white transition-colors disabled:opacity-40">
-          {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-          {copied ? 'Скопировано' : 'Копия'}
-        </button>
-        <button onClick={paste} title="Вставить из буфера" className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/15 text-xs text-text-secondary hover:border-accent/60 hover:text-white transition-colors">
-          <ClipboardPaste className="w-3.5 h-3.5" />
-          Вставить
+        <button onClick={copy} disabled={!output} title="Скопировать перевод" className="p-2 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-40">
+          {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4 text-text-secondary" />}
         </button>
         <button onClick={() => { setInput(''); setOutput(''); setErr(''); }} title="Очистить" className="p-2 rounded-lg hover:bg-white/10 transition-colors">
           <Eraser className="w-4 h-4 text-text-secondary" />
@@ -294,17 +295,29 @@ export function TranslatorCard({ compact = false }: { compact?: boolean }) {
         </span>
       </div>
 
-      {/* результат — можно выделять и копировать вручную */}
-      <textarea
-        ref={outputEl}
-        value={output}
-        readOnly
-        onKeyDown={onFieldKeys('out')}
-        placeholder="Перевод появится здесь…"
-        spellCheck={false}
-        className={`w-full rounded-lg bg-accent/[0.06] border border-accent/20 text-sm p-3 resize-none select-text ${compact ? 'h-28' : 'h-32'}`}
-        style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-      />
+      {/* результат + кнопка копирования в углу */}
+      <div className={`relative w-full ${compact ? 'flex-1 min-h-0 flex' : ''}`}>
+        <textarea
+          ref={outputEl}
+          value={output}
+          readOnly
+          onKeyDown={onFieldKeys('out')}
+          placeholder="Перевод появится здесь…"
+          spellCheck={false}
+          className={`w-full rounded-lg bg-accent/[0.06] border border-accent/20 text-sm p-3 pr-10 resize-none select-text ${
+            compact ? 'flex-1 min-h-0' : 'h-32'
+          }`}
+          style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+        />
+        <button
+          onClick={copyOut}
+          disabled={!output}
+          title="Скопировать перевод"
+          className="absolute top-1.5 right-1.5 p-1.5 rounded-md hover:bg-white/10 transition-colors disabled:opacity-40"
+        >
+          {copiedOut ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5 text-text-secondary" />}
+        </button>
+      </div>
       {err && <div className="text-[11px] text-danger">{err}</div>}
       {via && output && !err && (
         <div className="text-[10px] text-text-muted">
